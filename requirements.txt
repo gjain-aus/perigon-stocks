@@ -1,2 +1,4 @@
 argparse
 requests
+polygon-api-client
+dotenv

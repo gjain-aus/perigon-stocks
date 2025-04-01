@@ -13,7 +13,7 @@ class Holding(dict):
     units: float
 
     def __init__(self, ticker: str, units: float):
-        self.ticker = ticker.lower()
+        self.ticker = ticker.upper()
         self.units = units
         dict.__init__(self,ticker=self.ticker,units=self.units) #make it easier to dump wiht JSON
     
