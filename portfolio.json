@@ -1,0 +1,12 @@
+{
+    "holdings": [
+        {
+            "ticker":"fds",
+            "units":100
+        },
+        {
+            "ticker":"tsla",
+            "units":300
+        }
+    ]
+}

@@ -3,6 +3,12 @@ import argparse
 import os
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, asdict
+from datetime import datetime, date, timedelta
+import logging
+
+#local files
+import prices
+from prices import SecurityPrices
 
 
 ###################################################################################################
@@ -23,6 +29,8 @@ class Holding(dict):
     def to_json_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+    def get_ticker(self) -> str:
+        return self.ticker
 
     @classmethod
     def from_json_dict(cls, data: Dict[str, Any]) -> 'Holding':
@@ -31,20 +39,6 @@ class Holding(dict):
             units=data["ticker"]
         )
 
-###################################################################################################
-#define dictionary of prices for a given ticker
-class SecurityPrices(dict):
-    def __init__(self):
-        dict.__init__(self)
-    
-    def add_security(self, ticker: str, prices: dict):
-        sorted_price_dates = sorted(prices.items())
-        sorted_prices_dict = dict(sorted_price_dates)
-        
-        ticker_lc = ticker.lower()
-        self[ticker_lc.lower()]=dict()
-        self[ticker_lc.lower()]["dates"]=list(sorted_prices_dict.keys())
-        self[ticker_lc.lower()]["values"]=list(sorted_prices_dict.values())
     
 ###################################################################################################
 # create a list of holdings based on JSON file
@@ -56,14 +50,6 @@ def process_holdings(holdings_json: dict) -> list:
 
     return holdings
 
-# create a list of holdings based on JSON file
-def process_prices(prices_json: dict) -> list:
-    sec_prices = SecurityPrices()
-    for ticker in prices_json:
-        sec_prices.add_security(ticker, prices_json[ticker])
-
-    return sec_prices
-
 
 ###################################################################################################
 """Load JSON data from a file and return it as a Python dictionary."""
@@ -72,30 +58,59 @@ def read_portfolio_from_file(file_path: str) -> dict:
         with open(file_path, 'r', encoding='utf-8') as file:
             return json.load(file)
     except FileNotFoundError:
-        print(f"Error: File '{file_path}' not found")
+        logging.critical(f"Error: File '{file_path}' not found")
         raise
     except json.JSONDecodeError as e:
-        print(f"Error decoding JSON from file: {e}")
+        logging.critical(f"Error decoding JSON from file: {e}")
         raise
     except Exception as e:
-        print(f"Unexpected error reading file: {e}")
+        logging.critical(f"Unexpected error reading file: {e}")
         raise
 
+
+###################################################################################################
+def analyze_holdings(holdings, security_prices):
+    for single_holding in holdings:
+        ticker=single_holding.get_ticker()
+        ticker_prices=security_prices.get_prices_for_ticker(ticker)
+        num_prices=len(ticker_prices)
+        overall_price_chg=(ticker_prices[-1][SecurityPrices.CLOSE]-ticker_prices[0][SecurityPrices.OPEN])
+        overall_percent_chg = (overall_price_chg)/ticker_prices[0][SecurityPrices.OPEN]
+        logging.info(f"{ticker} -- {num_prices} -- {overall_price_chg} -- {overall_percent_chg}")
 
 ###################################################################################################
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse JSON portfolio")
     parser.add_argument("-f","--filename", required=True, help="Path to the JSON file to parse")
+    parser.add_argument("-d","--days", required=True, type=int, choices=range(1,32), help="Number of days to fetch data for (1 to 31)")
+
+    logging.basicConfig(level=logging.INFO)
     
     # Parse arguments
     args = parser.parse_args()
     file_path = args.filename
+    numdays = args.days
 
     portfolio_details = read_portfolio_from_file(file_path)
-    print(json.dumps(portfolio_details,indent=2))
-
     holdings=process_holdings(portfolio_details['holdings'])
-    print(json.dumps(holdings,indent=2))
+    logging.debug(json.dumps(holdings,indent=2))
 
-    sec_prices=process_prices(portfolio_details['close_prices'])
-    print(json.dumps(sec_prices,indent=2))
+    today = date.today()
+    logging.debug(f"Today's date: {today}")
+
+    startd = today - timedelta(days=numdays)
+    logging.debug(f"Start date: {startd}")
+
+    #Fetch prices for all the tickers in portfolio
+    sp = prices.load_cached_prices()
+    for single_holding in holdings:
+        if sp.get_prices_for_ticker(single_holding.get_ticker())==None:
+            sp.add_security(single_holding.get_ticker(), prices.fetch_prices(single_holding.get_ticker(), startd, today))
+    
+    logging.debug(json.dumps(sp,indent=2))
+
+    with open(prices.PRICES_CACHE_FILE, 'w') as file:
+        json.dump(sp, file, indent=2)
+        logging.debug(f"wrote prices to {prices.PRICES_CACHE_FILE}")
+
+    analyze_holdings(holdings, sp)
